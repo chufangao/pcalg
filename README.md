@@ -1,4 +1,4 @@
-# pcalg
+# Python pcalg
 PC algorithm directly ported from R code
 
 This algorithm is logically translated from the R package: https://www.rdocumentation.org/packages/pcalg/versions/2.6-0
