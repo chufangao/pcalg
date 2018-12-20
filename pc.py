@@ -1,4 +1,3 @@
-import networkx as nx
 import itertools
 from itertools import combinations, chain
 from gsq.ci_tests import ci_test_bin, ci_test_dis
@@ -6,18 +5,6 @@ from scipy.stats import norm, pearsonr
 import pandas as pd
 import numpy as np
 import math
-
-
-# pc(suffStat, indepTest, alpha, labels, p,
-#    fixedGaps = NULL, fixedEdges = NULL, NAdelete = TRUE, m.max = Inf,
-#    u2pd = c("relaxed", "rand", "retry"),
-#    skel.method = c("stable", "original", "stable.fast"),
-#    conservative = FALSE, maj.rule = FALSE, solve.confl = FALSE,
-#    numCores = 1, verbose = FALSE)
-# e.g.
-# pc(suffStat, indepTest = gaussCItest, p = ncol(gmG$x),alpha = 0.01)
-# pc(list(dm = gmD$x, adaptDF = FALSE),pcalg::disCItest,.05,c('X1','X2','X3','X4','X5'))
-#
 
 
 def powerset(iterable):
@@ -287,8 +274,8 @@ def udag2pdagRelaxed(graph):
                 if pdag[i][j] == 1 and pdag[j][i] == 0:
                     ind.append((i, j))
         # sort to correspond with r
-        for a, b in sorted(ind, key=lambda x:(x[1],x[0])):
-        # for a, b in ind:
+        for a, b in sorted(ind, key=lambda x: (x[1], x[0])):
+            # for a, b in ind:
             isC = []
             for i in range(len(search_pdag)):
                 if (search_pdag[b][i] == 1 and search_pdag[i][b] == 1) and (
@@ -296,7 +283,8 @@ def udag2pdagRelaxed(graph):
                     isC.append(i)
             if len(isC) > 0:
                 for c in isC:
-                    if 'unfTriples' in graph.keys() and ((a, b, c) in graph['unfTriples'] or (c, b, a) in graph['unfTriples']):
+                    if 'unfTriples' in graph.keys() and (
+                            (a, b, c) in graph['unfTriples'] or (c, b, a) in graph['unfTriples']):
                         # if unfaithful, skip
                         continue
                     if pdag[b][c] == 1 and pdag[c][b] == 1:
@@ -318,8 +306,8 @@ def udag2pdagRelaxed(graph):
                 if pdag[i][j] == 1 and pdag[j][i] == 1:
                     ind.append((i, j))
         # sort to correspond with r
-        for a, b in sorted(ind, key=lambda x:(x[1],x[0])):
-        # for a,b in ind:
+        for a, b in sorted(ind, key=lambda x: (x[1], x[0])):
+            # for a,b in ind:
             isC = []
             for i in range(len(search_pdag)):
                 if (search_pdag[a][i] == 1 and search_pdag[i][a] == 0) and (
@@ -344,8 +332,8 @@ def udag2pdagRelaxed(graph):
                 if pdag[i][j] == 1 and pdag[j][i] == 1:
                     ind.append((i, j))
         # sort to correspond with r
-        for a, b in sorted(ind, key=lambda x:(x[1],x[0])):
-        # for a,b in ind:
+        for a, b in sorted(ind, key=lambda x: (x[1], x[0])):
+            # for a,b in ind:
             isC = []
             for i in range(len(search_pdag)):
                 if (search_pdag[a][i] == 1 and search_pdag[i][a] == 1) and (
@@ -354,7 +342,8 @@ def udag2pdagRelaxed(graph):
             if len(isC) >= 2:
                 for c1, c2 in combinations(isC, 2):
                     if search_pdag[c1][c2] == 0 and search_pdag[c2][c1] == 0:
-                        if 'unfTriples' in graph.keys() and ((c1, a, c2) in graph['unfTriples'] or (c2, a, c1) in graph['unfTriples']):
+                        if 'unfTriples' in graph.keys() and (
+                                (c1, a, c2) in graph['unfTriples'] or (c2, a, c1) in graph['unfTriples']):
                             # if unfaithful, skip
                             continue
                         if search_pdag[a][b] == 1 and search_pdag[b][a] == 1:
@@ -376,8 +365,8 @@ def udag2pdagRelaxed(graph):
             if pdag[i][j] == 1:
                 ind.append((i, j))
     # need to sort to correspond with R version
-    for x, y in sorted(ind, key=lambda x:(x[1],x[0])):
-    # for x,y in ind:
+    for x, y in sorted(ind, key=lambda x: (x[1], x[0])):
+        # for x,y in ind:
         # print(x, y)
         allZ = []
         for z in range(len(pdag)):
@@ -424,6 +413,11 @@ def pc(suffStat, alpha, labels, indepTest=ci_test_dis, p='Use labels',
     return udag2pdagRelaxed(graph)
 
 
+def fci(suffstat, indepTest, alpha, levels, p, type='adaptive', fixedGaps=None, fixedEdges=None, NAdelete=True,
+        m_max=float('inf'), pdsep_max=float('inf')):
+    pass
+
+
 def gaussCItest(suffstat, x, y, S):
     C = suffstat["C"]
     n = suffstat["n"]
@@ -435,17 +429,17 @@ def gaussCItest(suffstat, x, y, S):
     elif len(S) == 1:
         r = (C[x, y] - C[x, S] * C[y, S]) / math.sqrt((1 - math.pow(C[y, S], 2)) * (1 - math.pow(C[x, S], 2)))
     else:
-        m = C[np.ix_([x]+[y]+S, [x]+[y]+S)]
+        m = C[np.ix_([x] + [y] + S, [x] + [y] + S)]
         PM = np.linalg.pinv(m)
         # print(PM)
         r = -1 * PM[0, 1] / math.sqrt(PM[0, 0] * PM[1, 1])
-    r = min(cut_at, max(-1*cut_at, r))
+    r = min(cut_at, max(-1 * cut_at, r))
     # return r
     # print(r)
     # def zstat(x, y, S, C, n):
     #     r = pcorOrder(x, y, S, C)
     res = math.sqrt(n - len(S) - 3) * .5 * math.log1p((2 * r) / (1 - r))
-        # return res
+    # return res
     # z = zstat(x, y, S, C=suffstat["C"], n=suffstat["n"])
     return 2 * (1 - norm.cdf(abs(res)))
 
@@ -459,6 +453,7 @@ if __name__ == '__main__':
     # file = 'gmD.csv'
     data = pd.read_csv(file)
     # print(data)
-    p = pc(suffStat={"C": data.corr().values, "n": data.values.shape[0]}, alpha=.05, labels=[str(i) for i in range(7)], indepTest=gaussCItest)
+    p = pc(suffStat={"C": data.corr().values, "n": data.values.shape[0]}, alpha=.05, labels=[str(i) for i in range(7)],
+           indepTest=gaussCItest)
     # p = pc(suffStat=data.values, alpha=.05, labels=[str(i) for i in range(5)], indepTest=ci_test_dis)
     print(p)
