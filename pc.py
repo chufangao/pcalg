@@ -78,6 +78,9 @@ def checkTriple(a, b, c, nbrsA, nbrsC, sepsetA, sepsetC, suffStat, alpha, indepT
     newsepsetA = set(list(sepsetA))
     newsepsetC = set(list(sepsetC))
 
+    if len(temp) == 0:
+        temp.append(False)
+
     res = 3
     if maj_rule:
         if sum(temp) / len(temp) < .5:
@@ -559,7 +562,8 @@ def pdsep(skel, suffStat, indepTest, p, sepSet, alpha, pMax, m_max=float('inf'),
 
 def updateList(path, set, old_list):  # arguments are all lists
     temp = []
-    temp.append(old_list)
+    if len(old_list) > 0:
+        temp.append(old_list)
     temp.extend([path + [s] for s in set])
     return temp
 
@@ -624,7 +628,7 @@ def minUncovCircPath(p, pag, path, unfVect):
         while done == False and len(path_list) > 0:
             mpath = path_list[0]
             x = mpath[-1]
-            path_list = path_list[i:len(path_list)]
+            path_list = path_list[1:len(path_list)]
             visted[x] = True
             if pag[x][d] == 1 and pag[d][x] == 1:
                 mpath = [a] + mpath + [d, b]
@@ -824,23 +828,24 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                             counterD += 1
                             d = indD[counterD]
                             if pag[c][d] == 1 and pag[d][c] == 1:
-                                pag[a][b] = pag[b][a] = 3
-                                pag[a][c] = pag[c][a] = 3
-                                pag[c][d] = pag[c][d] = 3
-                                pag[d][b] = pag[b][d] = 3
-                            else:
-                                path2check = [a, c, d, b]
-                                if faith_check(path2check, unfVect, p):
+                                if len(unfVect)==0:
                                     pag[a][b] = pag[b][a] = 3
                                     pag[a][c] = pag[c][a] = 3
                                     pag[c][d] = pag[c][d] = 3
                                     pag[d][b] = pag[b][d] = 3
-                else:
-                    ucp = minUncovCircPath(p, pag=pag, path=(a, c, d, b), unfVect=unfVect)
-                    if len(ucp) > 1:
-                        pag[ucp[0]][ucp[-1]] = pag[ucp[-1]][ucp[0]] = 3
-                        for j in range(len(ucp) - 1):
-                            pag[ucp[j]][ucp[j + 1]] = pag[ucp[j + 1]][ucp[j]] = 3
+                                else:
+                                    path2check = [a, c, d, b]
+                                    if faith_check(path2check, unfVect, p):
+                                        pag[a][b] = pag[b][a] = 3
+                                        pag[a][c] = pag[c][a] = 3
+                                        pag[c][d] = pag[c][d] = 3
+                                        pag[d][b] = pag[b][d] = 3
+                            else:
+                                ucp = minUncovCircPath(p, pag=pag, path=(a, c, d, b), unfVect=unfVect)
+                                if len(ucp) > 1:
+                                    pag[ucp[0]][ucp[-1]] = pag[ucp[-1]][ucp[0]] = 3
+                                    for j in range(len(ucp) - 1):
+                                        pag[ucp[j]][ucp[j + 1]] = pag[ucp[j + 1]][ucp[j]] = 3
         if rules[5]:  # R6
             ind = []
             for i in range(len(pag)):
@@ -971,13 +976,13 @@ def fci(suffStat, indepTest, alpha, labels, skel_method=("stable", "original", "
     graphDict = skeleton(suffStat, indepTest, alpha, labels=labels, method=skel_method,
                          fixedGaps=fixedGaps, fixedEdges=fixedEdges,
                          NAdelete=NAdelete, m_max=m_max, numCores=numCores, verbose=verbose)
-    # print(graphDict["pMax"])
+    # get sepset
     pc_ci = pc_cons_intern(graphDict, suffStat, alpha, indepTest, maj_rule=False)
-    # print(pc_ci["unfTriples"])
 
+    # recalculate sepsets and G, orient v structures
     pdSepRes = pdsep(graphDict, suffStat, indepTest=indepTest, p=len(labels), alpha=alpha, pMax=graphDict["pMax"],
                      m_max=graphDict["max_ord"], sepSet=pc_ci["sepset"], unfVect=pc_ci["unfTriples"])
-    # print(pdSepRes["sepset"])
+
     res = udag2pag(pdSepRes["G"], sepset=pdSepRes["sepset"], unfVect=set())
     print(np.array(res))
     return res
@@ -1011,13 +1016,17 @@ def gaussCItest(suffstat, x, y, S):
 
 
 if __name__ == '__main__':
-    # file = 'datasets/gmD.csv'
+    file = 'datasets/gmD.csv'
+    file = 'datasets/BD Cont.csv'
+    file = 'datasets/BD Disc.csv'
+    file = 'datasets/BD5 Cluster X Disc Y Outcome (2).csv'
+    file = 'datasets/BD5 Cluster X2 Cont X1 Outcome (1).csv'
+    file = 'datasets/BD5 Cluster X2 Disc X1 Outcome (1).csv'
     file = 'datasets/ID1 Disc (1).csv'
-    # file = 'datasets/BD Cont.csv'
-    # file = 'datasets/BD5 Cluster X2 Disc X1 Outcome (1).csv'
-
-    # file = 'gmD.csv'
+    file = 'datasets/ID1 Disc (2).csv'
+    file = 'datasets/mdata.csv'
     data = pd.read_csv(file)
-    p = fci(suffStat={"C": data.corr().values, "n": data.values.shape[0]}, alpha=.05,
-            labels=[str(i) for i in data.columns], indepTest=gaussCItest)
-    # p = fci(suffStat=data.values, alpha=.05, labels=[str(i) for i in range(5)], indepTest=ci_test_dis)
+
+    print(data.columns)
+    p = fci(suffStat={"C": data.corr().values, "n": data.values.shape[0]}, alpha=.05,labels=[str(i) for i in data.columns], indepTest=gaussCItest)
+    #p = fci(suffStat=data.values, alpha=.05, labels=[str(i) for i in data.columns], indepTest=ci_test_dis)
