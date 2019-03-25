@@ -1,0 +1,200 @@
+useDynLib(pcalg)
+
+###----- Imports ------------------------------------------------------
+
+importFrom("stats", cor, cor.test, cov, cov2cor,
+           fisher.test, pchisq, pnorm, qnorm,
+           rbinom, rcauchy, rnorm, rt, runif,
+           sd, setNames, symnum, uniroot)
+
+importFrom("utils", combn, str)
+
+importFrom("graphics", par, plot.default, plot, title)
+
+importMethodsFrom("methods", coerce, show)
+importFrom("methods",
+           setClass, setClassUnion, setMethod, setOldClass, setValidity,
+           getClass, getClassDef, callGeneric, as, is, extends,
+	   new, validObject,
+	   signature, representation, prototype)
+
+## aargh: slow loading {currently just for getGraph() and similar}
+## importFrom("Matrix", coerce)
+## importClassesFrom("Matrix", Matrix, sparseMatrix, TsparseMatrix)
+
+importFrom("abind", abind)
+importFrom("corpcor", pseudoinverse)
+
+importFrom("robustbase",
+	   covOGK, hard.rejection,
+	   Qn, s_Qn, scaleTau2 #, Sn, s_Sn, s_mad, s_IQR
+	   )
+
+importFrom("graph",
+           reverseEdgeDirections,
+           edgeRenderInfo, "edgeRenderInfo<-")
+importClassesFrom("graph", graph, graphAM, graphNEL)
+importMethodsFrom("graph",
+		  ## addEdge,
+		  coerce,# as(., ...)
+		  edges, edgeData,
+		  edgeDataDefaults, "edgeDataDefaults<-",
+		  isDirected,
+		  nodes, "nodes<-",
+		  numNodes, numEdges,
+		  subGraph, ugraph)
+
+importFrom("igraph", graph.adjacency, igraph.from.graphNEL, is.chordal,
+	   plot.igraph, graph.dfs, k.regular.game, get.adjacency,
+           watts.strogatz.game, simplify, bipartite.random.game,
+           barabasi.game, interconnected.islands.game, degree.sequence.game)
+
+importFrom("RBGL",
+	   biConnComp, johnson.all.pairs.sp, separates, bfs, connectedComp)
+## problems on Mac;
+## used in
+## biConnComp: pdsep -> fci
+## johnson.all.pairs.sp -> dsep (-> dsepTest), dreach (-> backdoor)
+## separates -> dsep
+## bfs -> dsep
+## connectedComp -> pag2magAM, backdoor
+
+## also    sp.between -- but only for deprecated beta.special(), hence RBGL::*
+
+importFrom("ggm", isAcyclic, transClos, topOrder, msep)
+importFrom("Rcpp", evalCpp) # Needed for any package relying on Rcpp headers...
+  # Otherwise, there are runtime errors.
+
+importFrom("bdsmatrix", gchol) ## for jointIda ("MCD")
+
+importFrom("sfsmisc", digitsBase, is.whole)
+
+importFrom("fastICA", fastICA)
+importFrom("clue", solve_LSAP)
+importFrom("dagitty", dagitty, isAdjustmentSet, adjustmentSets)
+###----- Exports ------------------------------------------------------
+
+export(getGraph)# our S4 generic including methods
+
+export(trueCov,
+       randomDAG,
+       wgtMatrix,
+       rmvDAG,
+       pcSelect,
+       zStat,
+       condIndFisherZ,
+       pcorOrder,
+       compareGraphs,
+       getNextSet,
+       mcor,
+       pcSelect.presel,
+       corGraph,
+       dag2cpdag,
+       ## adj.check,
+       udag2pdag, udag2pdagSpecial, udag2pdagRelaxed,
+       shd,
+       pcAlgo, pcAlgo.Perfect,
+       pdag2dag,
+       udag2pag,
+       beta.special,
+       beta.special.pcObj,
+       causalEffect,
+       dreach, qreach,
+       plotAG,
+       skeleton,
+       pc,
+       gSquareBin,
+       gSquareDis,
+       gaussCItest,
+       # gaussCItest.fast,
+       dsep,
+       dsepTest,
+       disCItest,
+       binCItest,
+       ida,
+       idaFast,
+       legal.path,
+       plotSG,
+       pc.cons.intern,
+       checkTriple,
+       triple2numb,
+       fci,
+       pdsep,
+       rfci,
+       find.unsh.triple,
+       udag2apag,
+       dag2pag, # skeleton.dag2pag,
+       iplotPC,
+       showEdgeList,
+       showAmat,
+       visibleEdge,
+       possibleDe,
+       pag2magAM,
+       backdoor,
+       jointIda,
+       ## Alain's :
+       r.gauss.pardag,
+       rmvnorm.ivent,
+       gies,
+       ges,
+       gds,
+       simy,
+       mat2targets,
+       targets2mat,
+       dag2essgraph,
+       ## --- end{Alain}
+       fciPlus,
+       lingam, LINGAM,
+       randDAG,
+       gac,
+       ## no longer: use as(*,"amat")
+       ##  displayAmat,
+       pdag2allDags,
+       possDe,
+       possAn,
+       pcalg2dagitty,
+       addBgKnowledge,
+       adjustment,
+       isValidGraph,
+       ages)
+
+## These are "internal" i.e., in man/pcalg-internal.Rd
+## _FIXME ?_                     ---------------------
+export(##ancTS,
+       ## has.new.coll,
+       ## ci.test,
+       ## dep.triple,
+       ## faith.check,
+       ## find.sink,
+       ## flipEdges,
+       ## minUncovCircPath,
+       ## minUncovPdPath,
+       ## minDiscrPath,
+       ## my.SpecialDag,
+       ## reach, # NB: dreach(), qreach() *are* non-internal
+       ## updateList,
+       ## FIXME{MM}: document !
+       rfci.vStruc,
+       allDags,
+       amat2dag)
+
+
+exportClasses("pcAlgo",
+              "fciAlgo",
+              "gAlgo",
+              "ParDAG",
+              "GaussParDAG",
+              "Score",
+              "GaussL0penIntScore",
+              "GaussL0penObsScore",
+              "EssGraph")
+
+exportMethods(# needed? "coerce",# <- defined via setAs(., ..) used via  as(A, "class_B")
+              "summary", "show", "plot")
+
+S3method(print, fciAlgo)
+S3method(print, pcAlgo)
+S3method(print, amat)
+## FIXME: TODO
+# S3method(print, LINGAM)
+

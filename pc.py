@@ -1,60 +1,39 @@
 import copy
 import itertools
 from itertools import combinations, chain
-from gsq.ci_tests import ci_test_bin, ci_test_dis
-from scipy.stats import norm, pearsonr
+from gsq.ci_tests import ci_test_dis
+from scipy.stats import norm
 import pandas as pd
 import numpy as np
 import math
+from ges import ges
 
 
 def powerset(iterable):
-    """
-    powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)
-    """
     xs = list(iterable)
     # note we return an iterator rather than a list
     return chain.from_iterable(combinations(xs, n) for n in range(len(xs) + 1))
 
 
-# Purpose:  For any unshielded triple A-B-C, consider all subsets D of
-# the neighbors of A and of the neighbors of C, and record the sets
-# D for which A and C are conditionally independent given D. If B
-# is in none of these sets, do nothing (it is a
-# v-structure) and also delete B from sepset(A,C) if present (so we are
-# sure that a v-structure will be created). If B is in all sets, do nothing
-# (it is not a v-structure) and also add B to sepset(A,C) if not present
-# (so we are sure that a v-structure will not be created). If maj.rule=FALSE
-# the normal conservative version is applied, hence if B is in
-# some but not all sets, mark the triple as "ambiguous". If maj.rule=TRUE
-# we mark the triple as "ambiguous" if B is in exactly 50% of the cases,
-# if less than 50% define it as a v-structure, and if in more than 50%
-# no v-structure.
-# ----------------------------------------------------------------------
-# Arguments: - sk: output returned by function "skeleton"
-#            - suffStat: Sufficient statistics for independent tests
-#            - indepTest: Function for independence test
-#            - alpha: Significance level of test
-#            - version.unf[1]: 1 it checks if b is in some sepsets,
-#                              2 it also checks if there exists a sepset
-#                              which is a subset of the neighbours.
-#            - version.unf[2]: 1 same as in Tetrad (do not consider
-#                              the initial sepset), 2 it also considers
-#                              the initial sepset
-#            - maj.rule: FALSE/TRUE if the majority rule idea is applied
-# ----------------------------------------------------------------------
-# Value: - unfTripl: Triple that were marked as unfaithful
-#        - vers: vector containing the version (1 or 2) of the
-#                corresponding triple saved in unfTripl (1=normal
-#                unfaithful triple that is B is in some sepsets;
-#                2=triple coming from version.unf[1]==2
-#                that is a and c are indep given the initial sepset
-#                but there doesn't exist a subset of the neighbours
-#                that d-separates them)
-#        - sk: updated skelet object, sepsets might have been updated
-# ----------------------------------------------------------------------
-# Author: Markus Kalisch, Date: 12 Feb 2010, 10:43
-# Modifications: Diego Colombo
+def gaussCItest(suffstat, x, y, S):
+    C = suffstat["C"]
+    n = suffstat["n"]
+    cut_at = 0.9999999
+    if len(S) == 0:
+        r = C[x, y]
+    elif len(S) == 1:
+        r = (C[x, y] - C[x, S[0]] * C[y, S[0]]) / math.sqrt(
+            (1 - math.pow(C[y, S[0]], 2)) * (1 - math.pow(C[x, S[0]], 2)))
+    else:
+        M = C[np.ix_([x] + [y] + S, [x] + [y] + S)]
+        PM = np.linalg.pinv(M)
+        r = -1 * PM[0, 1] / math.sqrt(PM[0, 0] * PM[1, 1])
+    r = min(cut_at, max(-1 * cut_at , r))
+
+    res = math.sqrt(n - len(S) - 3) * .5 * math.log1p((2 * r) / (1 - r))
+    return 2 * (1 - norm.cdf(abs(res)))
+
+
 def checkTriple(a, b, c, nbrsA, nbrsC, sepsetA, sepsetC, suffStat, alpha, indepTest, maj_rule=True):
     nr_indep = 0
 
@@ -75,8 +54,10 @@ def checkTriple(a, b, c, nbrsA, nbrsC, sepsetA, sepsetC, suffStat, alpha, indepT
                 nr_indep += 1
                 temp.append(b in s)
 
-    newsepsetA = set(list(sepsetA))
-    newsepsetC = set(list(sepsetC))
+    if sepsetA == None:
+        sepsetA = set()
+    if sepsetC == None:
+        sepsetC = set()
 
     if len(temp) == 0:
         temp.append(False)
@@ -85,93 +66,72 @@ def checkTriple(a, b, c, nbrsA, nbrsC, sepsetA, sepsetC, suffStat, alpha, indepT
     if maj_rule:
         if sum(temp) / len(temp) < .5:
             res = 1
-            try:
-                newsepsetA.remove(b)
-                newsepsetC.remove(b)
-            except:
-                pass
+            if b in sepsetA:
+                sepsetA.remove(b)
+            if b in sepsetC:
+                sepsetC.remove(b)
         elif sum(temp) / len(temp) > .5:
             res = 2
-            newsepsetA.add(b)
-            newsepsetC.add(b)
+            sepsetA.add(b)
+            sepsetC.add(b)
         else:
-            # unfaithful
-            pass
+            pass  # unfaithful
     else:
         if sum(temp) / len(temp) == 0:
             res = 1
-            try:
-                newsepsetA.remove(b)
-                newsepsetC.remove(b)
-            except:
-                pass
+            if b in sepsetA:
+                sepsetA.remove(b)
+            if b in sepsetC:
+                sepsetC.remove(b)
         elif sum(temp) / len(temp) == 1:
             res = 2
-            newsepsetA.add(b)
-            newsepsetC.add(b)
+            sepsetA.add(b)
+            sepsetC.add(b)
         else:
-            # unfaithful
-            pass
+            pass  # unfaithful
 
-    return res, {'sepsetA': newsepsetA, 'sepsetC': newsepsetC}
+    return res, {'sepsetA': sepsetA, 'sepsetC': sepsetC}
 
 
 def pc_cons_intern(graphDict, suffstat, alpha, indepTest, version_unf=(None, None), maj_rule=True,
                    verbose=False):
     sk = graphDict['sk']
-    p = len(sk)
-    unfTripl = [None for i in range(min(p * p, 100000))]
-    counter = -1
 
     if sk.any():
-        ind = []
-        for i in range(len(sk)):
-            for j in range(len(sk)):
-                if sk[i][j] == True:
-                    ind.append((i, j))
+        ind = [(i, j)
+               for i in range(len(sk))
+               for j in range(len(sk))
+               if sk[i][j] == True
+               ]
         ind = sorted(ind, key=lambda x: (x[1], x[0]))
 
-        tripleMatrix = []
+        tripleMatrix = [(a, b, c)
+                        for a, b in ind
+                        for c in range(len(sk))
+                        if a < c and sk[a][c] == False and sk[b][c] == True]
         # go thru all edges
-        for a, b in ind:
-            for c in range(len(sk)):
-                if a < c and sk[a][c] == False and sk[b][c] == True:
-                    tripleMatrix.append((a, b, c))
-            # print(tripleMatrix)
-            for a, b, c in tripleMatrix:
-                nbrsA = [i for i in range(len(sk)) if sk[i][a] == True]
-                nbrsC = [i for i in range(len(sk)) if sk[i][c] == True]
+        for a, b, c in tripleMatrix:
+            nbrsA = [i for i in range(len(sk)) if sk[i][a] == True]
+            nbrsC = [i for i in range(len(sk)) if sk[i][c] == True]
 
-                res, r_abc = checkTriple(a, b, c, nbrsA, nbrsC, graphDict['sepset'][a][c],
-                                         graphDict['sepset'][c][a],
-                                         suffstat, alpha, indepTest, maj_rule=maj_rule)
+            res, r_abc = checkTriple(a, b, c, nbrsA, nbrsC, graphDict['sepset'][a][c],
+                                     graphDict['sepset'][c][a],
+                                     suffstat, alpha, indepTest, maj_rule=maj_rule)
+            if res == 3:
+                if 'unfTriples' in graphDict.keys():
+                    graphDict['unfTriples'].add((a, b, c))
+                else:
+                    graphDict['unfTriples'] = {(a, b, c)}
+            graphDict['sepset'][a][c] = r_abc['sepsetA']
+            graphDict['sepset'][c][a] = r_abc['sepsetC']
 
-                if res == 3:
-                    if 'unfTriples' in graphDict.keys():
-                        graphDict['unfTriples'].add((a, b, c))
-                    else:
-                        graphDict['unfTriples'] = {(a, b, c)}
-
-                graphDict['sepset'][a][c] = r_abc['sepsetA']
-                graphDict['sepset'][c][a] = r_abc['sepsetC']
-
-    # print(np.array(graphDict['sepset']))
     return graphDict
 
 
-# Purpose: Generate the next set in a list of all possible sets of size
-#          k out of 1:n;
-#  Also returns a boolean whether this set was the last in the list.
-# ----------------------------------------------------------------------
-# Arguments:
-# - n,k: Choose a set of size k out of numbers 1:n
-# - set: previous set in list
-# ----------------------------------------------------------------------
-# Author: Markus Kalisch, Date: 26 Jan 2006, 17:37
 def skeleton(suffStat, indepTest, alpha, labels, method,
              fixedGaps, fixedEdges,
              NAdelete, m_max, numCores, verbose):
-    sepset = [[[] for i in range(len(labels))] for i in range(len(labels))]
+    sepset = [[None for i in range(len(labels))] for i in range(len(labels))]
 
     # form complete undirected graph, true if edge i--j needs to be investigated
     G = [[True for i in range(len(labels))] for i in range(len(labels))]
@@ -193,30 +153,22 @@ def skeleton(suffStat, indepTest, alpha, labels, method,
     while done != True and any(G) and ord <= m_max:
         ord1 = ord + 1
         n_edgetests[ord1] = 0
-
         done = True
-
-        ind = []
-        for i in range(len(G)):
-            for j in range(len(G[i])):
-                if G[i][j] == True:
-                    ind.append((i, j))
-
         G1 = G.copy()
 
+        ind = [(i, j)
+               for i in range(len(G))
+               for j in range(len(G[i]))
+               if G[i][j] == True
+               ]
         for x, y in ind:
-            if G[x][y] == True:
-                # nbrsBool = [row[x] for row in G1]
-                # nbrsBool[y] = False
+            if G[y][x] == True:
                 nbrs = [i for i in range(len(G1)) if G1[x][i] == True and i != y]
-
-                # print('len nbrs', len(nbrs), ord)
                 if len(nbrs) >= ord:
                     if len(nbrs) > ord:
                         done = False
 
                     for nbrs_S in set(itertools.combinations(nbrs, ord)):
-                        # print(ord)
                         n_edgetests[ord1] = n_edgetests[ord1] + 1
                         # get pvalue, if dependent, pval should be small
                         pval = indepTest(suffStat, x, y, list(nbrs_S))
@@ -224,9 +176,8 @@ def skeleton(suffStat, indepTest, alpha, labels, method,
                             pMax[x][y] = pval
                         if pval >= alpha:
                             # then independent
-                            # print(x, y, 'independent given', list(nbrs_S))
                             G[x][y] = G[y][x] = False
-                            sepset[x][y] = list(nbrs_S)
+                            sepset[x][y] = set(nbrs_S)
                             break
         ord += 1
     # fix p values
@@ -237,36 +188,11 @@ def skeleton(suffStat, indepTest, alpha, labels, method,
     return {'sk': np.array(G), 'pMax': np.array(pMax), 'sepset': sepset, "unfTriples": set(), "max_ord": ord - 1}
 
 
-# Purpose: Perform PC-Algorithm, i.e., estimate skeleton of DAG given data
-# ----------------------------------------------------------------------
-# Arguments:
-# - dm: Data matrix (rows: samples, cols: nodes)
-# - C: correlation matrix (only for continuous)
-# - n: sample size
-# - alpha: Significance level of individual partial correlation tests
-# - corMethod: "standard" or "Qn" for standard or robust correlation
-#              estimation
-# - G: the adjacency matrix of the graph from which the algorithm
-#      should start (logical)
-# - datatype: distinguish between discrete and continuous data
-# - NAdelete: delete edge if pval=NA (for discrete data)
-# - m.max: maximal size of conditioning set
-# - u2pd: Function for converting udag to pdag
-#   "rand": udag2pdag
-#   "relaxed": udag2pdagRelaxed
-#   "retry": udag2pdagSpecial
-# - gTrue: Graph suffStatect of true DAG
-# - conservative: If TRUE, conservative PC is done
-# - numCores: handed to skeleton(), used for parallelization
-# ----------------------------------------------------------------------
-# Author: Markus Kalisch, Date: 26 Jan 2006; Martin Maechler
-# Modifications: Sarah Gerster, Diego Colombo, Markus Kalisch
 def udag2pdagRelaxed(graph):
     def orientConflictCollider(pdag, x, y, z):
         # x -> y <- z
         # pdag: 2d list, pdag[x,y] = 1 and pdag[y,x] = 0 means x -> y
         # returns updated pdag
-        print(np.array(pdag))
         if pdag[x][y] == 1:
             pdag[y][x] = 0
         else:
@@ -284,19 +210,15 @@ def udag2pdagRelaxed(graph):
         # Interpretation: No new collider is introduced
         # Out: Updated pdag
         search_pdag = pdag.copy()
-        ind = []
-        for i in range(len(pdag)):
-            for j in range(len(pdag)):
-                if pdag[i][j] == 1 and pdag[j][i] == 0:
-                    ind.append((i, j))
+        ind = [(i, j)
+               for i in range(len(pdag)) for j in range(len(pdag))
+               if pdag[i][j] == 1 and pdag[j][i] == 0]
         # sort to correspond with r
         for a, b in sorted(ind, key=lambda x: (x[1], x[0])):
             # for a, b in ind:
-            isC = []
-            for i in range(len(search_pdag)):
-                if (search_pdag[b][i] == 1 and search_pdag[i][b] == 1) and (
-                        search_pdag[a][i] == 0 and search_pdag[i][a] == 0):
-                    isC.append(i)
+            isC = [i for i in range(len(search_pdag))
+                   if (search_pdag[b][i] == 1 and search_pdag[i][b] == 1)
+                   and (search_pdag[a][i] == 0 and search_pdag[i][a] == 0)]
             if len(isC) > 0:
                 for c in isC:
                     if 'unfTriples' in graph.keys() and (
@@ -316,19 +238,19 @@ def udag2pdagRelaxed(graph):
         # Interpretation: Avoid cycle
         # normal version = conservative version
         search_pdag = pdag.copy()
-        ind = []
-        for i in range(len(pdag)):
-            for j in range(len(pdag)):
-                if pdag[i][j] == 1 and pdag[j][i] == 1:
-                    ind.append((i, j))
+        ind = [(i, j)
+               for i in range(len(pdag)) for j in range(len(pdag))
+               if pdag[i][j] == 1 and pdag[j][i] == 1]
         # sort to correspond with r
         for a, b in sorted(ind, key=lambda x: (x[1], x[0])):
             # for a,b in ind:
-            isC = []
-            for i in range(len(search_pdag)):
-                if (search_pdag[a][i] == 1 and search_pdag[i][a] == 0) and (
-                        search_pdag[i][b] == 1 and search_pdag[b][i] == 0):
-                    isC.append(i)
+            isC = [i for i in range(len(search_pdag))
+                   if (search_pdag[a][i] == 1 and search_pdag[i][a] == 0) and
+                   (search_pdag[i][b] == 1 and search_pdag[b][i] == 0)]
+            # for i in range(len(search_pdag)):
+            #     if (search_pdag[a][i] == 1 and search_pdag[i][a] == 0) and (
+            #             search_pdag[i][b] == 1 and search_pdag[b][i] == 0):
+            #         isC.append(i)
             if len(isC) > 0:
                 if pdag[a][b] == 1 and pdag[b][a] == 1:
                     pdag[a][b] = 1
@@ -342,19 +264,16 @@ def udag2pdagRelaxed(graph):
         # Rule 3: a-b, a-c1, a-c2, c1->b, c2->b but c1 and c2 not connected;
         # then a-b => a -> b
         search_pdag = pdag.copy()
-        ind = []
-        for i in range(len(pdag)):
-            for j in range(len(pdag)):
-                if pdag[i][j] == 1 and pdag[j][i] == 1:
-                    ind.append((i, j))
+        ind = [(i, j)
+               for i in range(len(pdag)) for j in range(len(pdag))
+               if pdag[i][j] == 1 and pdag[j][i] == 1]
         # sort to correspond with r
         for a, b in sorted(ind, key=lambda x: (x[1], x[0])):
             # for a,b in ind:
-            isC = []
-            for i in range(len(search_pdag)):
-                if (search_pdag[a][i] == 1 and search_pdag[i][a] == 1) and (
-                        search_pdag[i][b] == 1 and search_pdag[b][i] == 0):
-                    isC.append(i)
+            isC = [i for i in range(len(search_pdag))
+                   if (search_pdag[a][i] == 1 and search_pdag[i][a] == 1) and
+                   (search_pdag[i][b] == 1 and search_pdag[b][i] == 0)
+                   ]
             if len(isC) >= 2:
                 for c1, c2 in combinations(isC, 2):
                     if search_pdag[c1][c2] == 0 and search_pdag[c2][c1] == 0:
@@ -372,30 +291,19 @@ def udag2pdagRelaxed(graph):
 
         return pdag
 
-    # print(graph['sk'])
     pdag = [[0 if graph['sk'][i][j] == False else 1 for i in range(len(graph['sk']))] for j in range(len(graph['sk']))]
-    # print(np.array(pdag))
-    ind = []
-    for i in range(len(pdag)):
-        for j in range(len(pdag[i])):
-            if pdag[i][j] == 1:
-                ind.append((i, j))
+    ind = [(i, j)
+           for i in range(len(pdag)) for j in range(len(pdag))
+           if pdag[i][j] == 1]
     # need to sort to correspond with R version
     for x, y in sorted(ind, key=lambda x: (x[1], x[0])):
-        # for x,y in ind:
-        # print(x, y)
-        allZ = []
-        for z in range(len(pdag)):
-            if graph['sk'][y][z] == True and z != x:
-                allZ.append(z)
-        # print(allZ)
-        # print(x, y, allZ)
+        allZ = [z for z in range(len(pdag))
+                if graph['sk'][y][z] == True and z != x]
         for z in allZ:
-            if graph['sk'][x][z] == False and graph['sepset'][x][z] != None and graph['sepset'][z][x] != None and not (
-                    y in graph['sepset'][x][z] or y in graph['sepset'][z][x]):
+            if graph['sk'][x][z] == False and graph['sepset'][x][z] != None and graph['sepset'][z][x] != None and \
+                    not (y in graph['sepset'][x][z] or y in graph['sepset'][z][x]):
                 pdag[x][y] = pdag[z][y] = 1
                 pdag[y][x] = pdag[y][z] = 0
-                # pdag = orientConflictCollider(pdag,x,y,z)
 
     # do while
     old_dag = pdag.copy()
@@ -408,84 +316,58 @@ def udag2pdagRelaxed(graph):
         pdag = rule2(pdag)
         pdag = rule3(pdag)
 
-    # print(np.array(graph['sepset']))
     return np.array(pdag)
 
 
-def pc(suffStat, alpha, labels, indepTest=ci_test_dis, p='Use labels',
-       fixedGaps=None, fixedEdges=None, NAdelete=True, m_max=float("inf"),
-       u2pd=("relaxed", "rand", "retry"),
-       skel_method=("stable", "original", "stable.fast"),
-       conservative=False, maj_rule=True, solve_confl=False,
-       numCores=1, verbose=False):
-    # get skeleton
-    graphDict = skeleton(suffStat, indepTest, alpha, labels=labels, method=skel_method,
-                         fixedGaps=fixedGaps, fixedEdges=fixedEdges,
-                         NAdelete=NAdelete, m_max=m_max, numCores=numCores, verbose=verbose)
-    # orient edges
-    graph = pc_cons_intern(graphDict, suffStat, alpha, indepTest)
-    # apply rules
-    return udag2pdagRelaxed(graph)
-
-
-def legal_path(a, b, c, amat):
-    a_b = amat[a][b]
-    if a == c or a_b == 0 or amat[b][c] == 0:
-        return False
-    return amat[a][c] != 0 or (a_b == 2 and amat[c][b] == 2)
-
-
 def qreach(x, amat):
-    # print(amat)
+    # Purpose: Compute possible-d-sep(x) ("psep")
+    def legal_path(a, b, c, amat):
+        # Purpose: Is path a-b-c legal (either collider in b or a,b,c is triangle)
+        if a == c or amat[a][b] == 0 or amat[b][c] == 0:
+            return False
+        return amat[a][c] != 0 or (amat[a][b] == 2 and amat[c][b] == 2)
+
     A = [[1 if amat[i][j] != 0 else 0 for i in range(len(amat))] for j in range(len(amat))]
     PSEP = [i for i in range(len(A[x])) if A[x][i] != 0]
-    Q = nb = copy.deepcopy(PSEP)
+    Q = copy.deepcopy(PSEP)
+    nb = copy.deepcopy(PSEP)
     P = [x for i in range(len(Q))]
     for i in nb:  # delete edge to nbrs
         A[x][i] = 0
-    while (len(Q) > 0):
-        # print("Q:",Q,"P:",P)
 
-        a = Q[0]
-        Q = Q[1:len(Q)]
-        pred = P[0]
-        P = P[1:len(P)]
-        # print("Select",pred,"towards",a)
+    while len(Q) > 0:
+        a = Q.pop(0)
+        pred = P.pop(0)
         nb = [i for i in range(len(A[a])) if A[a][i] != 0]
-        # print("Check nbrs",nb)
 
         for b in nb:
             lres = legal_path(pred, a, b, amat)
             if lres == True:
+                # if amat[pred][b] != 0 or (amat[pred][a] == 2 and amat[b][a] == 2):
                 A[a][b] = 0
                 Q.append(b)
                 P.append(a)
                 PSEP.append(b)
-            # print(lres,end=" ")
-        # print("\n")
     while x in PSEP:
         PSEP.remove(x)
     return sorted(set(PSEP))
 
 
-def pdsep(skel, suffStat, indepTest, p, sepSet, alpha, pMax, m_max=float('inf'), pdsep_max=float('inf'), unfVect=None):
+def pdsep(skel, suffStat, indepTest, p, sepset, alpha, pMax, m_max=float('inf'), pdsep_max=float('inf'), unfVect=None):
     G = [[0 if skel['sk'][i][j] == False else 1 for i in range(len(skel['sk']))] for j in range(len(skel['sk']))]
     n_edgetest = [0 for i in range(1000)]
     ord = 0
-    allPdsep_tmp = [set() for i in range(p)]
 
     amat = copy.deepcopy(G)
-    ind = []
-    # orient colliders
-    for i in range(len(G)):
-        for j in range(len(G[i])):
-            if G[i][j] == 1:
-                ind.append((i, j))
+    ind = [(i, j)
+           for i in range(len(G)) for j in range(len(G))
+           if G[i][j] == 1]
     ind = sorted(ind, key=lambda x: (x[1], x[0]))
+    # orient colliders
     for x, y in ind:
         allZ = [i for i in range(len(amat[y])) if amat[y][i] != 0 and i != x]
         for z in allZ:
-            if amat[x][z] == 0 and not (y in sepSet[x][z] or y in sepSet[z][x]):
+            if amat[x][z] == 0 and not (y in sepset[x][z] or y in sepset[z][x]):
                 if len(unfVect) == 0:  # normal version
                     amat[x][y] = amat[z][y] = 2
                 else:  # conservative version, check if x-y-z faithful
@@ -497,59 +379,58 @@ def pdsep(skel, suffStat, indepTest, p, sepSet, alpha, pMax, m_max=float('inf'),
 
     for x in range(p):
         an0 = [True if amat[x][i] != 0 else False for i in range(len(amat))]
-        tf1 = [i for i in allPdsep[x] if i != x]
+        if any(an0):
+            tf1 = [i for i in allPdsep[x] if i != x]
+            adj_x = [i for i in range(len(an0)) if an0[i] == True]
 
-        adj_x = [i for i in range(len(an0)) if an0[i] == True]
+            for y in adj_x:
+                tf = [i for i in tf1 if i != y]
+                diff_set = [i for i in tf if i not in adj_x]
+                allPdsep_tmp[x] = tf + [y]
 
-        for y in adj_x:
-            tf = [i for i in tf1 if i != y]
-            diff_set = [i for i in tf if i not in adj_x]
-            allPdsep_tmp[x] = tf + [y]
-
-            if len(tf) > pdsep_max:
-                pass
-            elif len(diff_set) > 0:
-                done = False
-                ord = 0
-                while not done and ord < min(len(tf), m_max):
-                    # print(ord)
-                    ord += 1
-                    if ord == 1:
-                        for S in diff_set:
-                            pval = indepTest(suffStat, x, y, [S])
-                            n_edgetest[ord + 1] += 1
-                            if pval > pMax[x][y]:
-                                pMax[x][y] = pval
-                            if pval >= alpha:
-                                amat[x][y] = amat[y][x] = 0
-                                sepSet[x][y] = sepSet[y][x] = {S}
-                                done = True
-                                break
-                    else:  # ord > 1
-                        tmp_combn = combinations(tf, ord)
-                        if ord <= len(adj_x):
-                            for S in tmp_combn:
-                                if not set(S).issubset(adj_x):
-                                    pval = indepTest(suffStat, x, y, list(S))
-                                    n_edgetest[ord + 1] += 1
-                                    if pval > pMax[x][y]:
-                                        pMax[x][y] = pval
-                                    if pval > alpha:
-                                        amat[x][y] = amat[y][x] = 0
-                                        sepSet[x][y] = sepSet[y][x] = set(S)
-                                        done = True
-                                        break
-                        else:
-                            for S in tmp_combn:
-                                pval = indepTest(suffStat, x, y, list(S))
+                if len(tf) > pdsep_max:
+                    pass
+                elif len(diff_set) > 0:
+                    done = False
+                    ord = 0
+                    while not done and ord < min(len(tf), m_max):
+                        ord += 1
+                        if ord == 1:
+                            for S in diff_set:
+                                pval = indepTest(suffStat, x, y, [S])
                                 n_edgetest[ord + 1] += 1
                                 if pval > pMax[x][y]:
                                     pMax[x][y] = pval
-                                if pval > alpha:
+                                if pval >= alpha:
                                     amat[x][y] = amat[y][x] = 0
-                                    sepSet[x][y] = sepSet[y][x] = set(S)
+                                    sepset[x][y] = sepset[y][x] = {S}
                                     done = True
                                     break
+                        else:  # ord > 1
+                            tmp_combn = combinations(tf, ord)
+                            if ord <= len(adj_x):
+                                for S in tmp_combn:
+                                    if not set(S).issubset(adj_x):
+                                        n_edgetest[ord + 1] += 1
+                                        pval = indepTest(suffStat, x, y, list(S))
+                                        if pval > pMax[x][y]:
+                                            pMax[x][y] = pval
+                                        if pval >= alpha:
+                                            amat[x][y] = amat[y][x] = 0
+                                            sepset[x][y] = sepset[y][x] = set(S)
+                                            done = True
+                                            break
+                            else:  # ord > len(adj_x)
+                                for S in tmp_combn:
+                                    n_edgetest[ord + 1] += 1
+                                    pval = indepTest(suffStat, x, y, list(S))
+                                    if pval > pMax[x][y]:
+                                        pMax[x][y] = pval
+                                    if pval >= alpha:
+                                        amat[x][y] = amat[y][x] = 0
+                                        sepset[x][y] = sepset[y][x] = set(S)
+                                        done = True
+                                        break
     for i in range(len(amat)):
         for j in range(len(amat[i])):
             if amat[i][j] == 0:
@@ -557,13 +438,13 @@ def pdsep(skel, suffStat, indepTest, p, sepSet, alpha, pMax, m_max=float('inf'),
             else:
                 G[i][j] = True
 
-    return {'G': G, "sepset": sepSet, "pMax": pMax, "allPdsep": allPdsep_tmp, "max_ord": ord}
+    return {'G': G, "sepset": sepset, "pMax": pMax, "allPdsep": allPdsep_tmp, "max_ord": ord}
 
 
 def updateList(path, set, old_list):  # arguments are all lists
     temp = []
     if len(old_list) > 0:
-        temp.append(old_list)
+        temp = old_list
     temp.extend([path + [s] for s in set])
     return temp
 
@@ -586,28 +467,36 @@ def faith_check(cp, unfVect, p, boolean=True):
 
 
 def minDiscPath(pag, a, b, c):
+    # Purpose: find a minimal discriminating path for a,b,c.
     p = len(pag)
-    visited = [False for i in range(len(pag))]
+    visited = [False for i in range(p)]
     visited[a] = visited[b] = visited[c] = True
-
-    indD = [i for i in range(len(pag)) if pag[a][i] != 0 and pag[i][a] == 2 and visited[i] == False]
+    # find all neighbours of a  not visited yet
+    indD = [i for i in range(len(pag))
+            if pag[a][i] != 0 and pag[i][a] == 2 and visited[i] == False]
     if len(indD) > 0:
         path_list = updateList([a], indD, [])
         while len(path_list) > 0:
+            # next element in the queue
             mpath = path_list[0]
-            m = len(mpath)
             d = mpath[-1]
             if pag[c][d] == 0 and pag[d][c] == 0:
-                return mpath.reverse() + [b, c]
+                # minimal discriminating path found :
+                mpath.reverse()
+                return mpath + [b, c]
             else:
                 pred = mpath[-2]
-                path_list = path_list[1:len(path_list)]
+                path_list.pop(0)
                 visited[d] = True
-
+                # d is connected to c -----> search iteratively
                 if pag[d][c] == 2 and pag[c][d] == 3 and pag[pred][d] == 2:
-                    indR = [i for i in range(len(pag)) if pag[d][i] != 0 and pag[i][d] == 2 and visited[i] == False]
+                    # find all neighbours of d not visited yet
+                    indR = [i for i in range(len(pag))
+                            if pag[d][i] != 0 and pag[i][d] == 2 and visited[i] == False]  # r *-> d
                     if len(indR) > 0:
+                        # update the queues
                         path_list = updateList(mpath, indR, path_list)
+    # nothing found:  return
     return []
 
 
@@ -628,13 +517,12 @@ def minUncovCircPath(p, pag, path, unfVect):
         while done == False and len(path_list) > 0:
             mpath = path_list[0]
             x = mpath[-1]
-            path_list = path_list[1:len(path_list)]
+            path_list.pop(0)
             visted[x] = True
             if pag[x][d] == 1 and pag[d][x] == 1:
                 mpath = [a] + mpath + [d, b]
-                n = len(mpath)
                 uncov = True
-                for i in range(len(mpath) - 2):
+                for i in range(len(mpath) - 3):
                     if pag[mpath[i]][mpath[i + 2]] == 0 and pag[mpath[i + 2]][mpath[i]] == 0:
                         uncov = False
                         break
@@ -653,25 +541,25 @@ def minUncovPdPath(p, pag, a, b, c, unfVect):
     visited = [False for i in range(p)]
     visited[a] = visited[b] = visited[c] = True
     min_upd_path = []
+
     indD = [i for i in range(p) if
             (pag[b][i] == 1 or pag[b][i] == 2) and
             (pag[i][b] == 1 or pag[i][b] == 3) and
             pag[i][a] == 0 and visited[i] == False]
+
     if len(indD) > 0:
         path_list = updateList([b], indD, [])
         done = False
         while len(path_list) > 0 and done == False:
-            mpath = path_list[0]
-            path_list = path_list[1:len(path_list)]
-            m = len(mpath)
+            mpath = path_list.pop(0)
             d = mpath[-1]
             visited[d] = True
             if pag[d][c] in [1, 2] and pag[c][d] in [1, 3]:
                 # pd path found
                 mpath = [a] + mpath + [c]
                 uncov = True
-                for i in range(len(mpath) - 2):
-                    if not (pag[mpath[i]][mpath[i + 2]] == 0 and pag[mpath[i + 2][mpath[i]]] == 0):
+                for i in range(len(mpath) - 3):
+                    if not (pag[mpath[i]][mpath[i + 2]] == 0 and pag[mpath[i + 2]][mpath[i]] == 0):
                         uncov = False
                         break
                 if uncov == True:
@@ -679,8 +567,8 @@ def minUncovPdPath(p, pag, a, b, c, unfVect):
                         min_upd_path = mpath
                         done = True
             else:
-                indR = [i for i in range(p) if
-                        (pag[d][i] == 1 or pag[d][i] == 2) and
+                indR = [i for i in range(p)
+                        if (pag[d][i] == 1 or pag[d][i] == 2) and
                         (pag[i][d] == 1 or pag[i][d] == 3) and
                         visited[i] == False]
                 if len(indR) > 0:
@@ -692,13 +580,12 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
              orientCollider=True):
     pag = [[0 if pag[i][j] == False else 1 for i in range(len(pag))] for j in range(len(pag))]
     p = len(pag)
+
     indA = []  # store for R10
     if orientCollider == True:
-        ind = []
-        for i in range(len(pag)):
-            for j in range(len(pag[i])):
-                if pag[i][j] == 1:
-                    ind.append((i, j))
+        ind = [(i, j)
+               for i in range(p) for j in range(p)
+               if pag[i][j] == 1]
         ind = sorted(ind, key=lambda x: (x[1], x[0]))
         for x, y in ind:
             allZ = [i for i in range(len(pag[y])) if pag[y][i] != 0 and i != x]
@@ -711,20 +598,19 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                             pag[x][y] = pag[z][y] = 2
     # end orient collider
 
-    # old_pag1 = [[0 for i in range(len(pag))] for j in range(len(pag))]
     old_pag1 = None
     while old_pag1 != pag:
         old_pag1 = copy.deepcopy(pag)
-        if rules[0]:  # R1
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] == 2 and pag[j][i] != 0:
-                        ind.append((i, j))
+        # R1 ----------------------------------------------------------------------
+        if rules[0]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] == 2 and pag[j][i] != 0]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
             for a, b in ind:
-                indC = [i for i in range(len(pag)) if
-                        pag[b][i] != 0 and pag[i][b] == 1 and pag[a][i] == 0 and pag[i][a] == 0 and i != a]
+                indC = [i for i in range(len(pag))
+                        if pag[b][i] != 0 and pag[i][b] == 1 and
+                        pag[a][i] == 0 and pag[i][a] == 0 and i != a]
                 if len(indC) != 0:
                     if len(unfVect) != 0:
                         for c in indC:
@@ -735,33 +621,31 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                             if (a, b, c) not in unfVect and (c, b, a) not in unfVect:
                                 pag[b][c] = 2
                                 pag[c][b] = 3
-        if rules[1]:  # R2
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] == 1 and pag[j][i] != 0:
-                        ind.append((i, j))
+        # R2 ----------------------------------------------------------------------
+        if rules[1]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] == 1 and pag[j][i] != 0]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
             for a, c in ind:
-                indB = [i for i in range(len(pag)) if
-                        (pag[a][i] == 2 and pag[i][a] == 3 and pag[c][i] != 0 and pag[i][c] == 2) or
+                indB = [i for i in range(len(pag))
+                        if (pag[a][i] == 2 and pag[i][a] == 3 and pag[c][i] != 0 and pag[i][c] == 2) or
                         (pag[a][i] == 2 and pag[i][1] != 0 and pag[c][i] == 3 and pag[i][c] == 2)]
                 if len(indB) > 0:
                     pag[a][c] = 2
-        if rules[2]:  # R3
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] != 0 and pag[j][i] == 1:
-                        ind.append((i, j))
+        # R3 ----------------------------------------------------------------------
+        if rules[2]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] != 0 and pag[j][i] == 1]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
             for b, d in ind:
-                indAC = [i for i in range(len(pag)) if
-                         pag[b][i] != 0 and pag[i][b] == 2 and pag[i][d] == 1 and pag[d][i] != 0]
+                indAC = [i for i in range(len(pag))
+                         if pag[b][i] != 0 and pag[i][b] == 2 and pag[i][d] == 1 and pag[d][i] != 0]
                 if len(indAC) >= 2:
                     if len(unfVect) == 0:
                         counter = -1
-                        while counter < len(indAC) - 1 and pag[d][b] != 2:
+                        while counter < len(indAC) - 2 and pag[d][b] != 2:
                             counter += 1
                             ii = counter
                             while ii < len(indAC) - 1 and pag[d][b] != 2:
@@ -773,23 +657,22 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                             if pag[a][c] == 0 and pag[c][a] == 0 and c != a:
                                 if (a, b, c) not in unfVect and (c, b, a) not in unfVect:
                                     pag[d][b] = 2
-        if rules[3]:  # R4
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] != 0 and pag[j][i] == 1:
-                        ind.append((i, j))
+        # R4 ----------------------------------------------------------------------
+        if rules[3]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] != 0 and pag[j][i] == 1]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
 
             while len(ind) > 0:
-                b, c = ind[0]
-                ind = ind[1:len(ind)]
-                indA = [i for i in range(len(pag)) if
-                        pag[b][i] == 2 and pag[i][b] != 0 and pag[c][i] == 3 and pag[i][c] == 2]
+                b, c = ind.pop(0)
+                indA = [i for i in range(len(pag))
+                        if pag[b][i] == 2 and pag[i][b] != 0 and pag[c][i] == 3 and pag[i][c] == 2]
 
                 while len(indA) > 0 and pag[c][b] == 1:
-                    a = indA[0]
-                    indA = indA[1:len(indA)]
+                    a = indA.pop(0)
+                    # path is the initial triangle
+                    # Done is TRUE if either we found a minimal path or no path exists for this triangle
                     done = False
                     while done == False and pag[a][b] != 0 and pag[a][c] != 0 and pag[b][c] != 0:
                         md_path = minDiscPath(pag, a, b, c)
@@ -803,21 +686,20 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                             else:
                                 pag[a][b] = pag[b][c] = pag[c][b] = 2
                             done = True
-
-        if rules[4]:  # R5
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] == 1 and pag[j][i] == 1:
-                        ind.append((i, j))
+        # R5 ----------------------------------------------------------------------
+        if rules[4]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] == 1 and pag[j][i] == 1]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
             while len(ind) > 0:
-                a, b = ind[0]
-                ind = ind[1:len(ind)]
-                indC = [i for i in range(len(pag)) if
-                        pag[a][i] == 1 and pag[i][a] == 1 and pag[b][i] == 0 and pag[i][b] == 0 and i != b]
-                indD = [i for i in range(len(pag)) if
-                        pag[b][i] == 1 and pag[i][b] == 1 and pag[a][i] == 0 and pag[i][a] == 0 and i != a]
+                a, b = ind.pop(0)
+                indC = [i for i in range(p)
+                        if pag[a][i] == 1 and pag[i][a] == 1 and
+                        pag[b][i] == 0 and pag[i][b] == 0 and i != b]
+                indD = [i for i in range(p)
+                        if pag[b][i] == 1 and pag[i][b] == 1 and
+                        pag[a][i] == 0 and pag[i][a] == 0 and i != a]
                 if len(indD) > 0 and len(indC) > 0:
                     counterC = -1
                     while counterC < len(indC) - 1 and pag[a][b] == 1:
@@ -828,7 +710,7 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                             counterD += 1
                             d = indD[counterD]
                             if pag[c][d] == 1 and pag[d][c] == 1:
-                                if len(unfVect)==0:
+                                if len(unfVect) == 0:
                                     pag[a][b] = pag[b][a] = 3
                                     pag[a][c] = pag[c][a] = 3
                                     pag[c][d] = pag[c][d] = 3
@@ -844,29 +726,29 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                                 ucp = minUncovCircPath(p, pag=pag, path=(a, c, d, b), unfVect=unfVect)
                                 if len(ucp) > 1:
                                     pag[ucp[0]][ucp[-1]] = pag[ucp[-1]][ucp[0]] = 3
-                                    for j in range(len(ucp) - 1):
+                                    for j in range(len(ucp) - 2):
                                         pag[ucp[j]][ucp[j + 1]] = pag[ucp[j + 1]][ucp[j]] = 3
-        if rules[5]:  # R6
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] != 0 and pag[j][i] == 1:
-                        ind.append((i, j))
+        # R6 ----------------------------------------------------------------------
+        if rules[5]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] != 0 and pag[j][i] == 1]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
 
             for b, c in ind:
                 if len([i for i in range(len(pag)) if pag[b][i] == 3 and pag[i][b] == 3]) > 0:
                     pag[c][b] = 3
-        if rules[6]:  # R7
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] != 0 and pag[j][i] == 1:
-                        ind.append((i, j))
+        # R7 ----------------------------------------------------------------------
+        if rules[6]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] != 0 and pag[j][i] == 1]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
             for b, c in ind:
-                indA = [i for i in range(len(pag)) if
-                        pag[b][i] == 3 and pag[i][b] == 1 and pag[c][i] == 0 and pag[i][c] == 0 and i != c]
+                indA = [i for i in range(len(pag))
+                        if pag[b][i] == 3 and pag[i][b] == 1 and
+                        pag[c][i] == 0 and pag[i][c] == 0 and i != c]
+
                 if len(indA) > 0:
                     if len(unfVect) == 0:
                         pag[c][b] = 3
@@ -874,50 +756,45 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                         for a in indA:
                             if (a, b, c) not in unfVect and (c, b, a) not in unfVect:
                                 pag[c][b] = 3
-        if rules[7]:  # R8
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] == 2 and pag[j][i] == 1:
-                        ind.append((i, j))
+        # R8 ----------------------------------------------------------------------
+        if rules[7]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] == 2 and pag[j][i] == 1]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
             for a, c in ind:
-                indB = [i for i in range(len(pag)) if
-                        pag[i][a] == 3 and (pag[a][i] == 2 or pag[a][i] == 1) and pag[c][i] == 3 and pag[i][c] == 2]
+                indB = [i for i in range(len(pag))
+                        if pag[i][a] == 3 and (pag[a][i] == 2 or pag[a][i] == 1) and
+                        pag[c][i] == 3 and pag[i][c] == 2]
                 if len(indB) > 0:
                     pag[c][a] = 3
-        if rules[8]:  # R8
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] == 2 and pag[j][i] == 1:
-                        ind.append((i, j))
+        # R9 ----------------------------------------------------------------------
+        if rules[8]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] == 2 and pag[j][i] == 1]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
 
             while len(ind) > 0:
-                a, c = ind[0]
-                ind = ind[1:len(ind)]
-                indB = [i for i in range(len(pag)) if
-                        (pag[a][i] == 2 or pag[a][i] == 1) and
+                a, c = ind.pop(0)
+                indB = [i for i in range(len(pag))
+                        if (pag[a][i] == 2 or pag[a][i] == 1) and
                         (pag[i][a] == 1 or pag[i][a] == 3) and
                         (pag[c][i] == 0 and pag[i][c] == 0) and
                         i != c]
                 while len(indB) > 0 and pag[c][a] == 1:
-                    b = indB[0]
-                    indB = indB[1:len(indB)]
+                    b = indB.pop(0)
                     upd = minUncovPdPath(p, pag, a, b, c, unfVect=unfVect)
                     if len(upd) > 1:
                         pag[c][a] = 3
-        if rules[9]:  # R10
-            ind = []
-            for i in range(len(pag)):
-                for j in range(len(pag[i])):
-                    if pag[i][j] == 2 and pag[j][i] == 1:
-                        ind.append((i, j))
+        # R10 ----------------------------------------------------------------------
+        if rules[9]:
+            ind = [(i, j)
+                   for i in range(p) for j in range(p)
+                   if pag[i][j] == 2 and pag[j][i] == 1]
             ind = sorted(ind, key=lambda x: (x[1], x[0]))
             while len(ind) > 0:
-                a, b = ind[0]
-                ind = ind[1:len(ind)]
+                a, b = ind.pop(0)
                 indB = [i for i in range(p) if pag[c][i] == 3 and pag[i][c] == 2]
                 if len(indB) >= 2:
                     counterB = -1
@@ -942,8 +819,8 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                                     if (b, a, d) not in unfVect and (d, a, b) not in unfVect:
                                         pag[c][a] = 3
                             else:
-                                indX = [i for i in range(p) if
-                                        (pag[a][i] == 1 or pag[a][i] == 2) and
+                                indX = [i for i in range(p)
+                                        if (pag[a][i] == 1 or pag[a][i] == 2) and
                                         (pag[i][a] == 1 or pag[i][a] == 3) and
                                         i != c]
                                 if len(indX) >= 2:
@@ -959,74 +836,81 @@ def udag2pag(pag, sepset, rules=(True, True, True, True, True, True, True, True,
                                             t1 = minUncovPdPath(p, pag, a, first_pos, b, unfVect=unfVect)
                                             if len(t1) > 1:
                                                 t2 = minUncovPdPath(p, pag, a, sec_pos, d, unfVect=unfVect)
-                                                if len(t2) > 1 and first_pos != sec_pos and pag[first_pos][
-                                                    sec_pos] == 0:
+                                                if len(t2) > 1 and first_pos != sec_pos \
+                                                        and pag[first_pos][sec_pos] == 0:
                                                     # we found 2 uncovered pd paths
                                                     if len(unfVect) == 0:
                                                         pag[c][a] = 3
                                                     elif (first_pos, a, sec_pos) not in unfVect and (
                                                             sec_pos, a, first_pos) not in unfVect:
                                                         pag[c][a] = 3
-        return pag
+    return np.array(pag)
+
+
+def pc(suffStat, alpha, labels, indepTest=ci_test_dis, p='Use labels',
+       fixedGaps=None, fixedEdges=None, NAdelete=True, m_max=float("inf"),
+       u2pd=("relaxed", "rand", "retry"),
+       skel_method=("stable", "original", "stable.fast"),
+       conservative=False, maj_rule=True, solve_confl=False,
+       numCores=1, verbose=False):
+    # get skeleton
+    graphDict = skeleton(suffStat, indepTest, alpha, labels=labels, method=skel_method,
+                         fixedGaps=fixedGaps, fixedEdges=fixedEdges,
+                         NAdelete=NAdelete, m_max=m_max, numCores=numCores, verbose=verbose)
+    if verbose:
+        print('Got skeleton')
+    # orient edges
+    graph = pc_cons_intern(graphDict, suffStat, alpha, indepTest, verbose=verbose)
+    print(graph['sepset'])
+    if verbose:
+        print('Got sepsets')
+    # apply rules
+    return udag2pdagRelaxed(graph)
 
 
 def fci(suffStat, indepTest, alpha, labels, skel_method=("stable", "original", "stable.fast"), type='adaptive',
         fixedGaps=None, fixedEdges=None, NAdelete=True,
-        m_max=float('inf'), pdsep_max=float('inf'), numCores=1, verbose=False, maj_rule=True):
+        m_max=float('inf'), pdsep_max=float('inf'), numCores=1, verbose=False, maj_rule=False,
+        rules=(True, True, True, True, True, True, True, True, True, True)):
     graphDict = skeleton(suffStat, indepTest, alpha, labels=labels, method=skel_method,
                          fixedGaps=fixedGaps, fixedEdges=fixedEdges,
                          NAdelete=NAdelete, m_max=m_max, numCores=numCores, verbose=verbose)
     # get sepset
-    pc_ci = pc_cons_intern(graphDict, suffStat, alpha, indepTest, maj_rule=False)
+    pc_ci = pc_cons_intern(graphDict, suffStat, alpha, indepTest, maj_rule=maj_rule)
 
     # recalculate sepsets and G, orient v structures
     pdSepRes = pdsep(graphDict, suffStat, indepTest=indepTest, p=len(labels), alpha=alpha, pMax=graphDict["pMax"],
-                     m_max=graphDict["max_ord"], sepSet=pc_ci["sepset"], unfVect=pc_ci["unfTriples"])
+                     m_max=graphDict["max_ord"], sepset=pc_ci["sepset"], unfVect=pc_ci["unfTriples"])
+    # print(pdSepRes['allPdsep'])
+    # print(pdSepRes['sepset'])
 
-    res = udag2pag(pdSepRes["G"], sepset=pdSepRes["sepset"], unfVect=set())
-    print(np.array(res))
+    res = udag2pag(pdSepRes["G"], sepset=pdSepRes["sepset"], unfVect=set(), rules=rules)
     return res
 
 
-def gaussCItest(suffstat, x, y, S):
-    C = suffstat["C"]
-    n = suffstat["n"]
-
-    # def pcorOrder(i, j, k, C, cut_at=0.9999999):
-    cut_at = 0.9999999
-    if len(S) == 0:
-        r = C[x, y]
-    elif len(S) == 1:
-        r = (C[x, y] - C[x, S[0]] * C[y, S[0]]) / math.sqrt(
-            (1 - math.pow(C[y, S[0]], 2)) * (1 - math.pow(C[x, S[0]], 2)))
-    else:
-        m = C[np.ix_([x] + [y] + S, [x] + [y] + S)]
-        PM = np.linalg.pinv(m)
-        # print(PM)
-        r = -1 * PM[0, 1] / math.sqrt(PM[0, 0] * PM[1, 1])
-    r = min(cut_at, max(-1 * cut_at, r))
-    # return r
-    # print(r)
-    # def zstat(x, y, S, C, n):
-    #     r = pcorOrder(x, y, S, C)
-    res = math.sqrt(n - len(S) - 3) * .5 * math.log1p((2 * r) / (1 - r))
-    # return res
-    # z = zstat(x, y, S, C=suffstat["C"], n=suffstat["n"])
-    return 2 * (1 - norm.cdf(abs(res)))
-
-
 if __name__ == '__main__':
-    file = 'datasets/gmD.csv'
-    file = 'datasets/BD Cont.csv'
-    file = 'datasets/BD Disc.csv'
-    file = 'datasets/BD5 Cluster X Disc Y Outcome (2).csv'
-    file = 'datasets/BD5 Cluster X2 Cont X1 Outcome (1).csv'
-    file = 'datasets/BD5 Cluster X2 Disc X1 Outcome (1).csv'
-    file = 'datasets/ID1 Disc (1).csv'
-    file = 'datasets/ID1 Disc (2).csv'
-    file = 'datasets/mdata.csv'
+    # file = 'datasets/gmD.csv'
+    # file = 'datasets/BD Cont.csv'
+    # file = 'datasets/BD Disc.csv'
+    # file = 'datasets/BD5 Cluster X Disc Y Outcome (2).csv'
+    # file = 'datasets/BD5 Cluster X2 Cont X1 Outcome (1).csv'
+    # file = 'datasets/BD5 Cluster X2 Disc X1 Outcome (1).csv'
+    # file = 'datasets/ID1 Disc (1).csv'
+    # file = 'datasets/ID1 Disc (2).csv'
+    # file = 'datasets/mdata.csv'
+    # file = 'datasets/mdata2.csv'
+    # file = 'datasets/dataset1-continuous.csv'
+    file = 'C:/Users/gaoan/Downloads/Microsoft.SkypeApp_kzf8qxf38zg5c!App/All/Learn Model Test/datasets/kaggle/admission 1.1.csv'
     data = pd.read_csv(file)
-
     print(data.columns)
-    p = fci(suffStat={"C": data.corr().values, "n": data.values.shape[0]}, alpha=.05,labels=[str(i) for i in data.columns], indepTest=gaussCItest)
-    #p = fci(suffStat=data.values, alpha=.05, labels=[str(i) for i in data.columns], indepTest=ci_test_dis)
+    # print(gaussCItest({"C": data.corr().values, "n": data.values.shape[0]}, 1, 4, [2,0])); quit()
+
+    # rules = [True for i in range(10)]
+    p = fci(suffStat={"C": data.corr().values, "n": data.values.shape[0]}, alpha=.05,
+            labels=[str(i) for i in data.columns], indepTest=gaussCItest)
+    # p = fci(suffStat=data.values, alpha=.05, labels=[str(i) for i in data.columns], indepTest=ci_test_dis)
+    # p = pc(suffStat={"C": data.corr().values, "n": data.values.shape[0]}, alpha=.05,labels=[str(i) for i in data.columns], indepTest=gaussCItest)
+    # p = pc(suffStat=data.values, alpha=.05, labels=[str(i) for i in data.columns], indepTest=ci_test_dis)
+    # p = ges(data)
+    # print(len([1 for i in range(len(p)) for j in range(len(p)) if p[i,j]!=0]))
+    print(p)

@@ -1,0 +1,98 @@
+2010-10-08  Martin Maechler  <maechler@stat.math.ethz.ch>
+
+	* R/pcalg.R (pdsep): biCC: speedup
+
+2010-10-07  Markus Kalisch  <kalisch@stat.math.ethz.ch>
+
+	* R/pcalg.R (fci): Added option "labels" to give nodenames to PAG
+	(myfun): Undid MMs change in plot-fci, since the edge marks were
+	not plotted properly anymore
+
+2010-09-28  Markus Kalisch  <kalisch@stat.math.ethz.ch>
+
+	* man/gmI.Rd: description & details added
+
+	* man/gmG.Rd: description & details added
+
+	* man/gmD.Rd: description & details added
+
+	* man/gmB.Rd: description & details added
+
+2010-09-10  Martin Maechler  <maechler@stat.math.ethz.ch>
+
+	* R/pcalg.R (lm.cov): solve(A, b),  *NOT* solve(A) %*% b  !!!!!!!!
+	(legal.psep): speed up
+	* R/pcalg.R (plot(<fciAlgo>): make 'main' working, as for plot(<pc>)
+
+2010-09-09  Markus Kalisch  <kalisch@stat.math.ethz.ch>
+
+	* inst/doc/pcalgDoc.Snw (effect): Adapted text and code to fit to
+	the new data files
+
+	* man/skeleton.Rd: Adapted examples to new form of data files
+
+	* man/pc.Rd: Adapted examples to new form of data files
+
+2010-08-11  Markus Kalisch  <kalisch@stat.math.ethz.ch>
+
+	* tests/test_fci.R: Tests for conservative FCI added
+
+	* tests/test_pc.R: Tests for conservative PC added
+
+2010-08-09  Markus Kalisch  <kalisch@stat.math.ethz.ch>
+
+	* R/pcalg.R (upd): improved by diego
+	(ucp): improved by diego
+	(discr.path): improved by diego
+	(faith.check): new by diego
+	(checkTriple): new by markus and diego
+	(pc.cons.intern): new by diego
+	(find.upd): improved by diego
+	(triple2numb): new by diego
+	(pc): option 'conservative' included
+	(udag2pdagRelaxed): option 'unfVect' added for use in
+	conservative PC
+	(fci): options 'conservative', 'biCC' and 'cons.rules' added
+	(pdsep): options 'unfVect' and 'biCC' added
+	(udag2pag): option 'unfVect' added for use in
+	conservative PC
+
+2010-04-14  Markus Kalisch  <kalisch@stat.math.ethz.ch>
+
+	* R/pcalg.R (randomDAG): Bug fix (Empty graph could not be
+	transformed into adj matrix with as(G,"matrix"). Although it worked
+	with wgtMatrix, it was still worth fixing.
+
+2010-04-06  Markus Kalisch  <kalisch@stat.math.ethz.ch>
+
+	* R/pcalg.R (idaFast): Included rownames indicating the element of
+	y.pos.set, to which the line corresponds
+
+2010-03-26  Markus Kalisch  <kalisch@stat.math.ethz.ch>
+
+	* man/skeleton.Rd (fixedEdges): removed x11() and added split window
+
+	* man/pc.Rd (fixedEdges): removed x11() and added split window
+
+	* R/pcalg.R (ida): No change in functionality; changed
+	implementation of argument y.notparent so that it is easier to
+	understand. Checked that old and new version give identical results
+	on 100 random graphs.
+
+2010-03-23  Martin Maechler  <maechler@stat.math.ethz.ch>
+
+	* DESCRIPTION (Version): 1.0-1
+
+	* R/pcalg.R (plot-methods, plotSG): need Rgraphviz::plot() now that Rgraphviz is
+	not imported *before* method definition.
+
+	* R/AllClasses.R: move class definitions here (at least).
+
+	* pcalg.R (plotSG): add 'main' argument; do *return* the subgraph,
+	clean up code.
+	* man/plotSG.Rd: document 'main', use markup (\code{..}) properly.
+
+2010-03-22  Markus Kalisch  <kalisch@stat.math.ethz.ch>
+
+	* NAMESPACE: no longer import (from) Rgraphviz
+	* DESCRIPTION: ditto
