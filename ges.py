@@ -3,6 +3,7 @@ import networkx as nx
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import pandas as pd
+from oct2py import octave
 
 
 class EssentialGraph:
@@ -13,7 +14,7 @@ class EssentialGraph:
             self.G.add_node(i)
         self.data = data
         self.undirectedEdges = set()
-        self.datacount = np.sum(self.data, axis=0)
+        self.datacount = [len(data) for i in range(self.numVertices)]
         self.maxVertexDegree = [self.numVertices for i in range(self.numVertices)]
 
     def local(self, v, C_par):
@@ -31,22 +32,30 @@ class EssentialGraph:
         return -1 * BIC
 
     def local2(self, v, C_par):
+        # ScoreGaussL0PenRaw
         y = self.data.iloc[:, v]
         n = self.data.shape[0]
         a = np.sum(np.square(y))
 
         if len(C_par) > 0:
-            Z = self.data.iloc[:, C_par]
-            try:
-                Q, R = np.linalg.qr(Z)
-            except:
-                return 0
+            Z = self.data.iloc[:,    C_par].values
+
+            # try:
+                # Q, R = np.linalg.qr(Z)
+            Q, R = octave.feval('qr', Z, 0, nout=2)
+            # print(Q, R)
+            # except:
+                # return 0
 
             a -= np.square(np.linalg.norm(y.transpose().dot(Q)))
 
         if np.abs(a) < 1e-08:
             return float('inf')
         return -.5 * (1 + np.log(a / self.datacount[v])) * self.datacount[v] - .5 * np.log(n) * (1 + len(C_par))
+    # def local2(self, c, C_par):
+        # ScoreGaussL0PenScatter
+
+
 
     def existsPath(self, a, b, C, undirected=False):
         # trivial cases
@@ -153,13 +162,15 @@ class EssentialGraph:
                                 C_par = list(set(C).union(parents))
                                 if len(localScore.keys()) == 0 or tuple(C_par) not in localScore.keys():
                                     diffScore = -1 * self.local2(v, C_par)
+                                    # print('before', diffScore, C_par)
                                     localScore[tuple(C_par)] = diffScore
                                 else:
                                     diffScore = localScore[tuple(C_par)]
+                                    # print('before', diffScore, C_par)
                                 C_par.append(u)
 
                                 diffScore += self.local2(v, C_par)
-                                # print(v, C_par, diffScore)
+                                # print('after', diffScore, C_par)
 
                                 if diffScore > result['score']:
                                     result["source"] = u
@@ -179,7 +190,7 @@ class EssentialGraph:
                                 if append == True:
                                     cliqueStack.append(C_sub)
 
-                    stopsets.append(i)
+                        stopsets.append(i)
 
         return result
 
@@ -191,7 +202,9 @@ class EssentialGraph:
         # calculate score differences for all possible edges
         for v in range(self.getVertexCount()):
             insertion = self.getOptimalArrowInsertion(v)
+            print(insertion, v)
 
+            # if insertion["score"] > optInsertion["score"] - 1e-08:
             if insertion["score"] > optInsertion["score"]:
                 optInsertion = insertion
                 v_opt = v
@@ -200,6 +213,7 @@ class EssentialGraph:
             u_opt = optInsertion["source"]
             if verbose: print(u_opt, v_opt, optInsertion['clique'], optInsertion['score'])
             self.insert(u_opt, v_opt, optInsertion["clique"])
+            print(nx.to_numpy_matrix(self.G))
             return True
 
         return False
@@ -302,7 +316,8 @@ class EssentialGraph:
             si = 0
             while si < len(sets):
                 newSet = []
-                for vi in sets[si]:
+                tempCopy = sets[si].copy()
+                for vi in tempCopy:
                     if self.G.has_edge(a, vi):
                         # Orient edge to neighboring vertex, if requested, and
                         # store oriented edge in return set
@@ -314,13 +329,18 @@ class EssentialGraph:
                         # Move neighoring vertex
                         newSet.append(vi)
                         sets[si].remove(vi)
-
-                if len(newSet) != 0:
-                    sets.insert(si, newSet)
-                if len(sets[si]) == 0:
+                if len(sets[si]) == 0 and len(newSet) != 0:
                     sets.remove(sets[si])
-                si += 1
-
+                    sets.insert(si, newSet)
+                    si += 1
+                elif len(sets[si]) == 0:
+                    sets.remove(sets[si])
+                elif len(newSet) != 0:
+                    sets.insert(si, newSet)
+                    si += 2
+                else:
+                    si += 1
+                
         return ordering
 
     def isParent(self, a, b):
@@ -365,7 +385,7 @@ class EssentialGraph:
         while len(undecidableArrows) > 0 and labeledArrows > 0:
             for edge in undecidableArrows:
                 flag = NOT_PROTECTED
-                # check if in configuration a
+                # check if in configuration a                    
                 for edge2 in [e for e in arrowFlags if e[1] == edge[0]]:
                     if not self.isAdjacent(edge2[0], edge[1]):
                         if arrowFlags[edge2] == PROTECTED:
@@ -374,6 +394,9 @@ class EssentialGraph:
                         else:
                             flag = UNDECIDABLE
                 # check if in configuration c
+                if flag==PROTECTED:
+                    arrowFlags[edge] = flag                    
+                    continue
                 for edge2 in [e for e in arrowFlags if e[1] == edge[1]]:
                     if self.isParent(edge[0], edge2[0]):
                         if arrowFlags[edge2] == PROTECTED and arrowFlags[(edge[0], edge2[0])] == PROTECTED:
@@ -382,7 +405,12 @@ class EssentialGraph:
                         else:
                             flag = UNDECIDABLE
                 # check if in configuration d
+                if flag==PROTECTED:
+                    arrowFlags[edge] = flag
+                    continue
                 for edge2 in [e for e in arrowFlags if e[1] == edge[1]]:
+                    if flag == PROTECTED:
+                        break
                     for edge3 in [e for e in arrowFlags if e[1] == edge[1] and e[0] > edge2[0]]:
                         if self.isNeighbor(edge[0], edge2[0]) and \
                                 self.isNeighbor(edge[0], edge3[0]) and \
@@ -395,18 +423,34 @@ class EssentialGraph:
                 arrowFlags[edge] = flag
 
             # Replace unprotected arrows by lines; store affected edges in result set
+            # labeledArrows = len(undecidableArrows)
+            # arrowFlagsKeys = list(arrowFlags.keys())
+            # print('arrowFlagsKeys', arrowFlagsKeys)
+            # for edge1 in arrowFlagsKeys:
+            #     if edge1 in undecidableArrows and arrowFlags[edge1] != UNDECIDABLE:
+            #         undecidableArrows.remove(edge1)
+            #     if edge1 in arrowFlags.keys() and arrowFlags[edge1] == NOT_PROTECTED:
+            #         self.add_edge(edge1[1], edge1[0])
+            #         result.add(edge1)
+            #         arrowFlags.pop(edge1)
             labeledArrows = len(undecidableArrows)
             arrowFlagsKeys = list(arrowFlags.keys())
+            # print('arrowFlagsKeys', arrowFlagsKeys)
             for edge1 in arrowFlagsKeys:
-                if edge1 in undecidableArrows and arrowFlags[edge1] != UNDECIDABLE:
-                    undecidableArrows.remove(edge1)
-                if edge1 in arrowFlags.keys() and arrowFlags[edge1] == NOT_PROTECTED:
+                if arrowFlags[edge1] != UNDECIDABLE:
+                    if edge1 in undecidableArrows:
+                        undecidableArrows.remove(edge1)
+                if arrowFlags[edge1] == NOT_PROTECTED:
                     self.add_edge(edge1[1], edge1[0])
                     result.add(edge1)
                     arrowFlags.pop(edge1)
+
             labeledArrows -= len(undecidableArrows)
+
         if labeledArrows == 0 and len(undecidableArrows) > 0:
+            print('invalid graph')
             return None  # Invalid graph passed to replaceUnprotected
+            
         return result
 
     def getOptimalArrowDeletion(self, v):
@@ -484,7 +528,7 @@ class EssentialGraph:
 
         nbhdSubset = neighbors.copy()
         for i in reversed(range(len(ordering))):
-            nbhdSubset.remove(ordering[i])
+            nbhdSubset.pop(i)
             vertices = self.getNeighbors(ordering[i])
             C = list(set(vertices).intersection(nbhdSubset))
             C.append(ordering[i])
