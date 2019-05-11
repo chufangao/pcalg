@@ -549,7 +549,7 @@ def ges(data, verbose=False):
 
     tot = 0
     cont = True
-    iterate = True
+    iterate = False
     while cont == True:
         cont = False
         while graph.greedyForward(verbose=verbose) == True:
