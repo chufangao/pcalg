@@ -1,8 +1,9 @@
 import pandas as pd
 from sklearn.decomposition import FastICA
 
-def lingam(data, verbose=False):
-    pass
+def lingam(data, only_perm=False, fastICA_tol=1e-14, pmax_nz_brute = 8, pmax_slt_brute = 8, verbose=False):
+    p = data.shape[1]
+    
 
 
 if __name__ == '__main__':

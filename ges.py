@@ -329,17 +329,28 @@ class EssentialGraph:
                         # Move neighoring vertex
                         newSet.append(vi)
                         sets[si].remove(vi)
-                if len(sets[si]) == 0 and len(newSet) != 0:
-                    sets.remove(sets[si])
+
+                if len(newSet)==0:
+                    pass
+                else:
                     sets.insert(si, newSet)
                     si += 1
-                elif len(sets[si]) == 0:
+                if len(sets[si])==0:
                     sets.remove(sets[si])
-                elif len(newSet) != 0:
-                    sets.insert(si, newSet)
-                    si += 2
                 else:
                     si += 1
+
+                # if len(sets[si]) == 0 and len(newSet) != 0:
+                #     sets.remove(sets[si])
+                #     sets.insert(si, newSet)
+                #     si += 1
+                # elif len(sets[si]) == 0:
+                #     sets.remove(sets[si])
+                # elif len(newSet) != 0:
+                #     sets.insert(si, newSet)
+                #     si += 2
+                # else:
+                #     si += 1
                 
         return ordering
 
@@ -359,6 +370,7 @@ class EssentialGraph:
         UNDECIDABLE = 0
         PROTECTED = 1
         NOT_PROTECTED = 2
+
         arrowFlags = {}
         undecidableArrows = set()
         result = set()
