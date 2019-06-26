@@ -890,16 +890,6 @@ def fci(suffStat, indepTest, alpha, labels, skel_method=("stable", "original", "
 
 if __name__ == '__main__':
     # file = 'datasets/gmD.csv'
-    # file = 'datasets/BD Cont.csv'
-    # file = 'datasets/BD Disc.csv'
-    # file = 'datasets/BD5 Cluster X Disc Y Outcome (2).csv'
-    # file = 'datasets/BD5 Cluster X2 Cont X1 Outcome (1).csv'
-    # file = 'datasets/BD5 Cluster X2 Disc X1 Outcome (1).csv'
-    # file = 'datasets/ID1 Disc (1).csv'
-    # file = 'datasets/ID1 Disc (2).csv'
-    # file = 'datasets/mdata.csv'
-    # file = 'datasets/mdata2.csv'
-    # file = 'datasets/dataset1-continuous.csv'
     file = 'C:/Users/gaoan/Downloads/Microsoft.SkypeApp_kzf8qxf38zg5c!App/All/Learn Model Test/datasets/kaggle/admission 1.1.csv'
     data = pd.read_csv(file)
     print(data.columns)
