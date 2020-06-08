@@ -8,3 +8,6 @@ Discrete independence tests are also implemented by Keiichi SHIMA / IIJ Innovati
 https://github.com/keiichishima/pcalg
 
 Lingam was inspired by https://sites.google.com/site/sshimizu06/lingam, the link from the original LINGAM paper: A Linear Non-Gaussian Acyclic Model for Causal Discovery: https://www.cs.helsinki.fi/u/ahyvarin/papers/JMLR06.pdf
+
+Please note that most of these have not been intensively tested (except for pcalg).
+Additionally, directly comparing results from the official R package and a python implementation is difficult due to inherent differences between some math library calls. 
